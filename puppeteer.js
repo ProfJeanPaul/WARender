@@ -23,14 +23,28 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
                 '--disable-setuid-sandbox',
                 // Argumentos adicionales para entornos sin interfaz gráfica
                 '--disable-gpu',
-                '--disable-dev-shm-usage',
+                '--disable-dev-shm-usage', // Reduce el uso de /dev/shm, útil en contenedores
                 '--no-zygote',
-                '--single-process'
+                '--single-process', // Puede ayudar en algunos entornos
+                '--disable-setuid-sandbox',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--disable-background-networking',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-breakpad',
+                '--disable-client-side-phishing-detection',
+                '--disable-sync',
+                '--disable-features=site-per-process', // Puede ayudar con el rendimiento
+                '--disable-web-security', // Usar con precaución, pero a veces necesario en headless
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--blink-settings=imagesEnabled=false' // Deshabilitar imágenes para reducir carga
             ],
             // ¡IMPORTANTE! Comentamos executablePath. Dejamos que Puppeteer lo encuentre automáticamente.
             // La instalación a través de "postinstall": "npx puppeteer browsers install chrome"
             // debería colocarlo en una ubicación detectable por Puppeteer.
             // executablePath: '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome'
+            // dumpio: true // Esto es CRUCIAL para ver los logs internos del navegador en Render
         });
 
         const page = await browser.newPage();
@@ -43,35 +57,62 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         }
 
         console.log('Navegando a WhatsApp Web...');
-        await page.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle2', timeout: 60000 }); // Espera hasta que la red esté inactiva
+        // Aumentar el timeout para la navegación inicial
+        await page.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle2', timeout: 90000 }); // Aumentado a 90 segundos
+        console.log('Navegación a WhatsApp Web completada.');
+
 
         console.log('Esperando a que WhatsApp Web esté listo (escaneo de QR si es necesario)...');
         // Selectores alternativos para verificar que WhatsApp Web ha cargado y el usuario ha iniciado sesión.
+        // Aumentar el timeout total para esta espera
         const whatsappReadySelectors = [
-            'div[aria-label="Lista de chats"][role="grid"]', // Selector original
+            'div[aria-label="Lista de chats"][role="grid"]', // Selector original de la lista de chats
             'div[data-testid="chat-list"]', // Test ID común para la lista de chats
             'span[data-testid="chat-list-header-text"]', // Texto como "Chats" en el encabezado
             'div[aria-label="Barra lateral de chats"]', // Etiqueta aria de la barra lateral
             'div[aria-label="Lista de chats"]', // Versión más simple del selector original
-            'div[role="textbox"][aria-placeholder="Buscar"]' // El campo de búsqueda principal, visible cuando los chats están cargados
+            'div[role="textbox"][aria-placeholder="Buscar"]', // El campo de búsqueda principal, visible cuando los chats están cargados
+            'canvas[aria-label="Scan me!"]', // Si se queda en la pantalla del QR
+            'div[data-testid="qr-code-image"]' // Otro selector para el QR
         ];
 
         let foundReadySelector = null;
-        for (const selector of whatsappReadySelectors) {
-            try {
-                // Intentar esperar por cada selector con un timeout individual para no fallar de inmediato
-                await page.waitForSelector(selector, { visible: true, timeout: 10000 }); // Timeout de 10s por selector
-                foundReadySelector = selector;
-                console.log(`WhatsApp Web listo. Selector encontrado: ${foundReadySelector}`);
-                break; // Salir del bucle una vez que se encuentra un selector
-            } catch (e) {
-                console.log(`Selector de preparación "${selector}" no encontrado, intentando el siguiente...`);
+        const overallReadyTimeout = 120000; // Aumentado a 120 segundos (2 minutos)
+        const checkInterval = 2000; // Revisar cada 2 segundos
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < overallReadyTimeout) {
+            for (const selector of whatsappReadySelectors) {
+                try {
+                    // Usamos page.waitForSelector con un timeout muy corto (o checkear directamente)
+                    // para no bloquear el bucle si un selector no está presente.
+                    const element = await page.waitForSelector(selector, { visible: true, timeout: 1000 }); // Timeout corto por selector
+                    if (element) {
+                        foundReadySelector = selector;
+                        console.log(`WhatsApp Web listo. Selector encontrado: ${foundReadySelector}`);
+                        break; // Salir del bucle de selectores
+                    }
+                } catch (e) {
+                    // console.log(`Selector de preparación "${selector}" no encontrado, intentando el siguiente...`); // Comentado para reducir logs excesivos
+                }
             }
+            if (foundReadySelector) {
+                break; // Salir del bucle principal si se encontró un selector
+            }
+            await new Promise(resolve => setTimeout(resolve, checkInterval)); // Esperar antes de reintentar
         }
 
         if (!foundReadySelector) {
-            throw new new puppeteer.errors.TimeoutError('Tiempo de espera agotado: WhatsApp Web no se cargó o no se pudo iniciar sesión con ninguno de los selectores de preparación.');
+            throw new puppeteer.errors.TimeoutError(`Tiempo de espera agotado (${overallReadyTimeout / 1000}s): WhatsApp Web no se cargó o no se pudo iniciar sesión con ninguno de los selectores de preparación.`);
         }
+
+        // Si se encontró el QR, significa que la sesión no está activa.
+        if (foundReadySelector === 'canvas[aria-label="Scan me!"]' || foundReadySelector === 'div[data-testid="qr-code-image"]') {
+             console.error('WhatsApp Web está mostrando la pantalla de código QR. La sesión no está activa o ha expirado.');
+             throw new Error('Sesión de WhatsApp expirada o no iniciada. Por favor, inicia sesión localmente y sube el directorio whatsapp_data actualizado.');
+        }
+
+        console.log('WhatsApp Web listo para interacción.');
 
         // 1. Hacer clic en el campo de búsqueda principal (global)
         console.log('Buscando y haciendo clic en el campo de búsqueda principal...');
