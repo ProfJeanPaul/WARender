@@ -2,6 +2,29 @@
 // Script de Node.js para automatizar WhatsApp Web usando Puppeteer.
 
 const puppeteer = require('puppeteer'); // Importa la librería Puppeteer
+const fs = require('fs').promises; // Importa el módulo 'fs' para operaciones de sistema de archivos
+const path = require('path'); // Importa el módulo 'path' para manejar rutas de archivos
+
+// Define el directorio para guardar los datos de WhatsApp y las capturas de pantalla
+const WHATSAPP_DATA_DIR = './whatsapp_data';
+const SCREENSHOTS_DIR = path.join(WHATSAPP_DATA_DIR, 'screenshots');
+
+/**
+ * Función para tomar una captura de pantalla y guardarla en el servidor.
+ * @param {object} page - La instancia de la página de Puppeteer.
+ * @param {string} filename - El nombre del archivo de la captura de pantalla (sin extensión).
+ */
+async function takeScreenshot(page, filename) {
+    try {
+        // Asegurarse de que el directorio de capturas de pantalla exista
+        await fs.mkdir(SCREENSHOTS_DIR, { recursive: true });
+        const filePath = path.join(SCREENSHOTS_DIR, `${filename}.png`);
+        await page.screenshot({ path: filePath, fullPage: true });
+        console.log(`Captura de pantalla guardada en: ${filePath}`);
+    } catch (error) {
+        console.error(`Error al tomar la captura de pantalla "${filename}":`, error);
+    }
+}
 
 /**
  * Función principal para automatizar el envío de mensajes en WhatsApp Web.
@@ -17,7 +40,7 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         console.log('Iniciando navegador Chromium...');
         browser = await puppeteer.launch({
             headless: true, // ¡IMPORTANTE! Cambiado a true para el despliegue en servidor (Render)
-            userDataDir: './whatsapp_data', // Persiste la sesión para no escanear QR cada vez
+            userDataDir: WHATSAPP_DATA_DIR, // Persiste la sesión para no escanear QR cada vez
             args: [
                 '--no-sandbox', // Necesario para entornos de servidor (ej. Docker, Render)
                 '--disable-setuid-sandbox',
@@ -40,11 +63,7 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--blink-settings=imagesEnabled=false' // Deshabilitar imágenes para reducir carga
             ],
-            // ¡IMPORTANTE! Comentamos executablePath. Dejamos que Puppeteer lo encuentre automáticamente.
-            // La instalación a través de "postinstall": "npx puppeteer browsers install chrome"
-            // debería colocarlo en una ubicación detectable por Puppeteer.
-            // executablePath: '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome'
-            // dumpio: true // Esto es CRUCIAL para ver los logs internos del navegador en Render
+            dumpio: true // Esto es CRUCIAL para ver los logs internos del navegador en Render
         });
 
         const page = await browser.newPage();
@@ -61,6 +80,8 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         await page.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle2', timeout: 90000 }); // Aumentado a 90 segundos
         console.log('Navegación a WhatsApp Web completada.');
 
+        // Tomar una captura de pantalla inicial después de la navegación
+        await takeScreenshot(page, '01_after_navigation');
 
         console.log('Esperando a que WhatsApp Web esté listo (escaneo de QR si es necesario)...');
         // Selectores alternativos para verificar que WhatsApp Web ha cargado y el usuario ha iniciado sesión.
@@ -103,16 +124,22 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         }
 
         if (!foundReadySelector) {
+            // Tomar captura de pantalla antes de lanzar el error de timeout
+            await takeScreenshot(page, '02_timeout_whatsapp_ready');
             throw new puppeteer.errors.TimeoutError(`Tiempo de espera agotado (${overallReadyTimeout / 1000}s): WhatsApp Web no se cargó o no se pudo iniciar sesión con ninguno de los selectores de preparación.`);
         }
 
         // Si se encontró el QR, significa que la sesión no está activa.
         if (foundReadySelector === 'canvas[aria-label="Scan me!"]' || foundReadySelector === 'div[data-testid="qr-code-image"]') {
              console.error('WhatsApp Web está mostrando la pantalla de código QR. La sesión no está activa o ha expirado.');
+             // Tomar captura de pantalla específica para el QR
+             await takeScreenshot(page, '02_qr_code_displayed');
              throw new Error('Sesión de WhatsApp expirada o no iniciada. Por favor, inicia sesión localmente y sube el directorio whatsapp_data actualizado.');
         }
 
         console.log('WhatsApp Web listo para interacción.');
+        await takeScreenshot(page, '03_whatsapp_ready');
+
 
         // 1. Hacer clic en el campo de búsqueda principal (global)
         console.log('Buscando y haciendo clic en el campo de búsqueda principal...');
@@ -138,12 +165,15 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         }
 
         if (!foundSearchSelector) {
+            await takeScreenshot(page, '04_search_input_not_found');
             throw new Error('No se pudo encontrar el campo de búsqueda principal de WhatsApp Web con ninguno de los selectores.');
         }
 
         await page.click(foundSearchSelector);
         console.log('Campo de búsqueda principal clicado.');
         await new Promise(resolve => setTimeout(resolve, 1000)); // Pequeño retardo para asegurar el enfoque
+        await takeScreenshot(page, '05_search_input_clicked');
+
 
         // NEW: Buscar el campo de entrada de texto real para escribir después del clic
         console.log('Buscando el campo de entrada de texto para escribir el nombre del contacto...');
@@ -168,6 +198,7 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         }
 
         if (!activeSearchInputForTyping) {
+            await takeScreenshot(page, '06_active_search_input_not_found');
             throw new Error('No se pudo encontrar el campo de entrada de texto activo para escribir el nombre del contacto.');
         }
 
@@ -177,12 +208,16 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         await page.type(activeSearchInputForTyping, contactName, { delay: 50 }); // Simula escritura humanizada con delay
         console.log('Nombre de contacto escrito en el campo de búsqueda principal.');
         await new Promise(resolve => setTimeout(resolve, 2000)); // Espera a que los resultados de búsqueda aparezcan
+        await takeScreenshot(page, '07_contact_name_typed');
+
 
         // 3. Simular la pulsación de Enter para seleccionar el primer resultado (o abrir el chat)
         console.log('Simulando la pulsación de Enter para abrir el chat...');
         await page.keyboard.press('Enter');
         console.log('Enter simulado.');
         await new Promise(resolve => setTimeout(resolve, 3000)); // Espera a que el chat se abra completamente
+        await takeScreenshot(page, '08_chat_opened');
+
 
         // 4. Esperar a que el cuadro de texto del mensaje (compose-box) esté disponible
         console.log('Esperando el cuadro de texto del mensaje (compose-box)...');
@@ -190,6 +225,8 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         const messageTextboxSelector = 'div[role="textbox"][aria-placeholder="Escribe un mensaje"][data-lexical-editor="true"]';
         await page.waitForSelector(messageTextboxSelector, { visible: true, timeout: 10000 });
         console.log('Cuadro de texto del mensaje (compose-box) encontrado.');
+        await takeScreenshot(page, '09_message_textbox_found');
+
 
         // Bucle para enviar múltiples mensajes
         for (let i = 0; i < messages.length; i++) {
@@ -198,11 +235,15 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
             await page.type(messageTextboxSelector, currentMessage, { delay: 50 }); // Simula escritura humanizada
             console.log('Mensaje escrito.');
             await new Promise(resolve => setTimeout(resolve, 1000)); // Pequeño retardo antes de enviar
+            await takeScreenshot(page, `10_message_${i + 1}_typed`);
+
 
             console.log('Enviando el mensaje...');
             await page.keyboard.press('Enter');
             console.log('Mensaje enviado.');
             await new Promise(resolve => setTimeout(resolve, 2000)); // Espera a que el mensaje se envíe y el cuadro de texto se limpie
+            await takeScreenshot(page, `11_message_${i + 1}_sent`);
+
 
             // Aplicar el gap entre mensajes si no es el último y la opción lo permite
             if (sendOption === "multiple_and_close" && i < messages.length - 1 && messageGap > 0) {
@@ -212,9 +253,12 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         }
 
         console.log('Automatización completada con éxito.');
+        await takeScreenshot(page, '12_automation_complete');
 
     } catch (error) {
         console.error('Error durante la automatización de WhatsApp:', error);
+        // Tomar una captura de pantalla al ocurrir cualquier error
+        await takeScreenshot(page, `error_${Date.now()}`);
         throw error; // Re-lanza el error para que el servidor lo capture
     } finally {
         if (browser) {
