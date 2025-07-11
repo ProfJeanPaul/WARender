@@ -21,8 +21,7 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
             args: [
                 '--no-sandbox', // Necesario para entornos de servidor (ej. Docker, Render)
                 '--disable-setuid-sandbox',
-                '--start-maximized', // Inicia el navegador maximizado
-                // Añadir argumentos adicionales para entornos sin interfaz gráfica si es necesario
+                // Argumentos adicionales para entornos sin interfaz gráfica
                 '--disable-gpu',
                 '--disable-dev-shm-usage',
                 '--no-zygote',
@@ -47,10 +46,32 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
         await page.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle2', timeout: 60000 }); // Espera hasta que la red esté inactiva
 
         console.log('Esperando a que WhatsApp Web esté listo (escaneo de QR si es necesario)...');
-        // Espera por un elemento clave que indica que WhatsApp Web ha cargado completamente y está listo para interactuar.
-        // Esto asume que el usuario ya ha escaneado el código QR o que los datos de sesión son persistentes.
-        await page.waitForSelector('div[aria-label="Lista de chats"][role="grid"]', { timeout: 60000 });
-        console.log('WhatsApp Web listo.');
+        // Selectores alternativos para verificar que WhatsApp Web ha cargado y el usuario ha iniciado sesión.
+        const whatsappReadySelectors = [
+            'div[aria-label="Lista de chats"][role="grid"]', // Selector original
+            'div[data-testid="chat-list"]', // Test ID común para la lista de chats
+            'span[data-testid="chat-list-header-text"]', // Texto como "Chats" en el encabezado
+            'div[aria-label="Barra lateral de chats"]', // Etiqueta aria de la barra lateral
+            'div[aria-label="Lista de chats"]', // Versión más simple del selector original
+            'div[role="textbox"][aria-placeholder="Buscar"]' // El campo de búsqueda principal, visible cuando los chats están cargados
+        ];
+
+        let foundReadySelector = null;
+        for (const selector of whatsappReadySelectors) {
+            try {
+                // Intentar esperar por cada selector con un timeout individual para no fallar de inmediato
+                await page.waitForSelector(selector, { visible: true, timeout: 10000 }); // Timeout de 10s por selector
+                foundReadySelector = selector;
+                console.log(`WhatsApp Web listo. Selector encontrado: ${foundReadySelector}`);
+                break; // Salir del bucle una vez que se encuentra un selector
+            } catch (e) {
+                console.log(`Selector de preparación "${selector}" no encontrado, intentando el siguiente...`);
+            }
+        }
+
+        if (!foundReadySelector) {
+            throw new new puppeteer.errors.TimeoutError('Tiempo de espera agotado: WhatsApp Web no se cargó o no se pudo iniciar sesión con ninguno de los selectores de preparación.');
+        }
 
         // 1. Hacer clic en el campo de búsqueda principal (global)
         console.log('Buscando y haciendo clic en el campo de búsqueda principal...');
