@@ -21,11 +21,17 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
             args: [
                 '--no-sandbox', // Necesario para entornos de servidor (ej. Docker, Render)
                 '--disable-setuid-sandbox',
-                '--start-maximized' // Inicia el navegador maximizado
+                '--start-maximized', // Inicia el navegador maximizado
+                // Añadir argumentos adicionales para entornos sin interfaz gráfica si es necesario
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                '--no-zygote',
+                '--single-process'
             ],
-            // ¡IMPORTANTE! Especificar la ruta exacta donde Puppeteer instala Chromium en Render.
-            // Esta ruta se obtiene de los logs de construcción de Render.
-            executablePath: '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome'
+            // ¡IMPORTANTE! Comentamos executablePath. Dejamos que Puppeteer lo encuentre automáticamente.
+            // La instalación a través de "postinstall": "npx puppeteer browsers install chrome"
+            // debería colocarlo en una ubicación detectable por Puppeteer.
+            // executablePath: '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome'
         });
 
         const page = await browser.newPage();
