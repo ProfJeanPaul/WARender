@@ -3,10 +3,15 @@
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path'); // Importa el módulo 'path'
 const automateWhatsApp = require('./puppeteer.js'); // Importa la función de Puppeteer
 
 const app = express();
 const port = process.env.PORT || 3000; // Usa el puerto de Render o 3000 localmente
+
+// Define el directorio donde se guardan los datos de WhatsApp y las capturas de pantalla
+const WHATSAPP_DATA_DIR = path.join(__dirname, 'whatsapp_data');
+const SCREENSHOTS_DIR = path.join(WHATSAPP_DATA_DIR, 'screenshots');
 
 // Configuración de CORS
 // Permite solicitudes desde cualquier origen. En un entorno de producción,
@@ -20,6 +25,12 @@ app.use(express.json());
 app.get('/', (req, res) => {
     res.status(200).json({ message: 'WhatsApp Automator Server is running!' });
 });
+
+// NUEVO: Servir archivos estáticos desde el directorio whatsapp_data
+// Esto permitirá acceder a las capturas de pantalla y a los datos de sesión persistentes
+app.use('/whatsapp_data', express.static(WHATSAPP_DATA_DIR));
+console.log(`Sirviendo archivos estáticos desde: ${WHATSAPP_DATA_DIR} en la ruta /whatsapp_data`);
+
 
 // Ruta para enviar mensajes de WhatsApp
 app.post('/send-whatsapp-message', async (req, res) => {
