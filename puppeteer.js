@@ -23,9 +23,9 @@ async function automateWhatsApp(contactName, messages, initialDelay, messageGap,
                 '--disable-setuid-sandbox',
                 '--start-maximized' // Inicia el navegador maximizado
             ],
-            // En Render, Puppeteer generalmente encuentra el ejecutable de Chromium automáticamente.
-            // Puedes comentar o eliminar esta línea si causa problemas en tu entorno de Render.
-            // executablePath: '/Applications/Chromium.app/Contents/MacOS/Chromium'
+            // ¡IMPORTANTE! Especificar la ruta exacta donde Puppeteer instala Chromium en Render.
+            // Esta ruta se obtiene de los logs de construcción de Render.
+            executablePath: '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome'
         });
 
         const page = await browser.newPage();
